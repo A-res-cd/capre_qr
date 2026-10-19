@@ -1,0 +1,21 @@
+node_modules/
+.next/
+.env
+.env.*
+!.env.example
+.local-test/
+.local-tools/
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+cloudflare/dist/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+
+# unneccesary md
+BRANDING.md
+CLOUDFLARE.md
+PUBLIC-SCANNING.md
+VERIFICATION.md

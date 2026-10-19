@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: qr
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: organization_qr
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["qr_data:/var/lib/postgresql"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qr -d organization_qr"]
+      interval: 10s
+      retries: 5
+volumes:
+  qr_data:

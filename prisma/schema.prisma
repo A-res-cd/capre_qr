@@ -1,0 +1,110 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+}
+enum Status {
+  ACTIVE
+  PAUSED
+}
+model QRCode {
+  id String @id @default(uuid()) @db.Uuid
+  shortCode String @unique
+  name String
+  description String @default("")
+  destination String
+  status Status @default(ACTIVE)
+  archived Boolean @default(false)
+  foreground String @default("#102d32")
+  background String @default("#ffffff")
+  logo Bytes?
+  folderId String? @db.Uuid
+  folder Folder? @relation(fields: [folderId], references: [id])
+  tags QRCodeTag[]
+  totalScans Int @default(0)
+  lastScannedAt DateTime? @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+  version Int @default(1)
+  audit AuditLog[]
+  events ScanEvent[]
+  summaries ScanSummary[]
+  @@index([archived, status, createdAt])
+  @@index([folderId])
+}
+model Folder {
+  id String @id @default(uuid()) @db.Uuid
+  name String @unique
+  codes QRCode[]
+}
+model Tag {
+  id String @id @default(uuid()) @db.Uuid
+  name String @unique
+  codes QRCodeTag[]
+}
+model QRCodeTag {
+  qrId String @db.Uuid
+  tagId String @db.Uuid
+  qr QRCode @relation(fields: [qrId], references: [id])
+  tag Tag @relation(fields: [tagId], references: [id])
+  @@id([qrId, tagId])
+  @@index([tagId])
+}
+model AuditLog {
+  id String @id @default(uuid()) @db.Uuid
+  qrId String? @db.Uuid
+  qr QRCode? @relation(fields: [qrId], references: [id])
+  actor String
+  action String
+  changes Json
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  @@index([qrId, createdAt])
+}
+// Durable queue contains no IP, raw user agent, cookie, or visitor ID.
+model PendingScan {
+  id String @id @db.Uuid
+  qrId String @db.Uuid
+  occurredAt DateTime @db.Timestamptz(3)
+  device String
+  outcome String
+  queuedAt DateTime @default(now()) @db.Timestamptz(3)
+  @@index([queuedAt])
+}
+// Minimal permanent receipt prevents replay even after detailed retention cleanup.
+model ProcessedEvent {
+  id String @id @db.Uuid
+}
+model ScanEvent {
+  id String @id @db.Uuid
+  qrId String @db.Uuid
+  qr QRCode @relation(fields: [qrId], references: [id])
+  occurredAt DateTime @db.Timestamptz(3)
+  device String
+  outcome String
+  @@index([occurredAt])
+  @@index([qrId, occurredAt])
+}
+// UTC minute buckets allow timezone changes and partial-hour timezone offsets.
+model ScanSummary {
+  qrId String @db.Uuid
+  qr QRCode @relation(fields: [qrId], references: [id])
+  bucket DateTime @db.Timestamptz(3)
+  device String
+  outcome String
+  count Int @default(0)
+  @@id([qrId, bucket, device, outcome])
+  @@index([bucket, outcome])
+}
+model OrganizationSettings {
+  id Int @id @default(1)
+  name String @default("Our organization")
+  timezone String @default("Asia/Manila")
+  retentionDays Int @default(90)
+  accent String @default("#2e3f92")
+}
+model RateLimit {
+  key String @id
+  window DateTime @db.Timestamptz(3)
+  count Int @default(1)
+}

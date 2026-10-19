@@ -1,0 +1,40 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "capreqr",
+  "main": "cloudflare/worker.ts",
+  "compatibility_date": "2026-10-19",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": true,
+  "assets": {
+    "directory": "./cloudflare/dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "capre_db",
+      "database_id": "204e636e-4f54-4ea5-9ce0-444f2574fa19",
+      "migrations_dir": "cloudflare/migrations"
+    }
+  ],
+  "vars": {
+    "AUTH_URL": "https://capreqr.aariessapin05.workers.dev",
+    "QR_BASE_URL": "https://capreqr.aariessapin05.workers.dev",
+    "REPORTING_TIMEZONE": "Asia/Manila",
+    "ANALYTICS_RETENTION_DAYS": "90",
+    "ANALYTICS_ENQUEUE_TIMEOUT_MS": "150"
+  },
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  },
+  "observability": {
+    "enabled": false
+  },
+  "send_metrics": false
+}

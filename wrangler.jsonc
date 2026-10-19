@@ -22,8 +22,8 @@
     }
   ],
   "vars": {
-    "AUTH_URL": "https://capreqr.aariessapin05.workers.dev",
-    "QR_BASE_URL": "https://capreqr.aariessapin05.workers.dev",
+    "AUTH_URL": "https://capreqr.capre.workers.dev",
+    "QR_BASE_URL": "https://capreqr.capre.workers.dev",
     "REPORTING_TIMEZONE": "Asia/Manila",
     "ANALYTICS_RETENTION_DAYS": "90",
     "ANALYTICS_ENQUEUE_TIMEOUT_MS": "150"

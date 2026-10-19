@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { Buffer } from 'node:buffer';
 import type { Context, Env, QRRow } from './types';
 import { actor, authRoute, requireStaff } from './auth';
+import { membership, staffList, saveMember } from './staff';
 import { codeId, findCode, lifecycle, listCodes, present, saveCode } from './codes';
 import { analytics, analyticsCsv } from './analytics';
 import { HttpError, json, link, privateHeaders, readJson, settings } from './common';
@@ -15,7 +16,10 @@ async function management(request: Request, env: Env) {
   const url = new URL(request.url), [resource,id,action,...extra] = url.pathname.slice('/api/manage/'.length).split('/');
   if (extra.length) throw new HttpError(404,'Not found.');
   let data: unknown;
-  if (resource === 'codes' && !id) {
+  if (resource === 'me' && !id && request.method === 'GET') data={email:staff,role:(await membership(env,staff))!.role};
+  else if (resource === 'staff' && !id && request.method === 'GET') data=await staffList(env,staff);
+  else if (resource === 'staff' && !id && request.method === 'PUT') data=await saveMember(env,staff,await readJson(request));
+  else if (resource === 'codes' && !id) {
     if (request.method === 'GET') data = await listCodes(env,url.searchParams);
     else if (request.method === 'POST') data = await saveCode(env,await readJson(request),staff);
     else throw new HttpError(405,'Method not allowed.');

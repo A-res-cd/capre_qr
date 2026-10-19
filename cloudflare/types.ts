@@ -8,6 +8,7 @@ export interface Env {
   AUTH_URL: string;
   QR_BASE_URL: string;
   STAFF_EMAILS: string;
+  OWNER_EMAILS?: string;
   REPORTING_TIMEZONE?: string;
   ANALYTICS_RETENTION_DAYS?: string;
   ANALYTICS_ENQUEUE_TIMEOUT_MS?: string;

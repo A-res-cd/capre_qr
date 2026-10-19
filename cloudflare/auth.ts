@@ -1,5 +1,6 @@
 import { SignJWT, jwtVerify, createRemoteJWKSet } from 'jose';
 import type { Env } from './types';
+import { membership } from './staff';
 import { assertOrigin, HttpError, json, originFor } from './common';
 const sessionName = 'capreqr-session';
 const stateName = 'capreqr-oauth';
@@ -9,7 +10,7 @@ function secret(env: Env) {
   if (!env.AUTH_SECRET || env.AUTH_SECRET.length < 32) throw new HttpError(503, 'Configure AUTH_SECRET with at least 32 random characters.');
   return new TextEncoder().encode(env.AUTH_SECRET);
 }
-export function allowed(env: Env, email: string) { return (env.STAFF_EMAILS || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean).includes(email.toLowerCase()); }
+export async function allowed(env: Env, email: string) { return !!(await membership(env,email))?.active; }
 function cookieValue(request: Request, name: string) { return (request.headers.get('cookie') || '').split(';').map(s => s.trim()).find(s => s.startsWith(name + '='))?.slice(name.length + 1); }
 function cookie(env: Env, name: string, value: string, seconds: number, path = '/') {
   const secure = originFor(env.AUTH_URL).startsWith('https:');
@@ -28,7 +29,7 @@ export async function actor(request: Request, env: Env) {
   const token = cookieValue(request, sessionName); if (!token) return null;
   try {
     const { payload } = await jwtVerify(token, secret(env), { algorithms: ['HS256'], issuer, audience: 'staff', maxTokenAge: '8h', requiredClaims: ['exp','iat'] });
-    return payload.verifiedStaff === true && typeof payload.email === 'string' && allowed(env, payload.email) ? payload.email.toLowerCase() : null;
+    return payload.verifiedStaff === true && typeof payload.email === 'string' && await allowed(env, payload.email) ? payload.email.toLowerCase() : null;
   } catch { return null; }
 }
 export async function requireStaff(request: Request, env: Env) {
@@ -42,14 +43,14 @@ export async function requireStaff(request: Request, env: Env) {
 export async function authRoute(request: Request, env: Env) {
   const url = new URL(request.url), path = url.pathname;
   if (path === '/api/auth/session' && request.method === 'GET') {
-    const email = await actor(request, env); return email ? json({ email }) : json({ error: 'Staff sign-in required.' }, 401);
+    const email = await actor(request, env); return email ? json({ email, role:(await membership(env,email))!.role }) : json({ error: 'Staff sign-in required.' }, 401);
   }
   if (path === '/api/auth/signout' && request.method === 'POST') {
     assertOrigin(request, env);
     return json({ ok: true }, 200, { 'Set-Cookie': cookie(env, sessionName, '', 0) });
   }
   if (path === '/api/auth/signin/google' && request.method === 'GET') {
-    if (!env.AUTH_GOOGLE_ID || !env.AUTH_GOOGLE_SECRET || !(env.STAFF_EMAILS || '').trim()) throw new HttpError(503, 'Configure Google OAuth and the staff allowlist before signing in.');
+    if (!env.AUTH_GOOGLE_ID || !env.AUTH_GOOGLE_SECRET) throw new HttpError(503, 'Configure Google OAuth before signing in.');
     const state = random(), verifier = random(), nonce = random();
     const signed = await new SignJWT({ state, verifier, nonce }).setProtectedHeader({ alg: 'HS256' }).setIssuer(issuer).setAudience('oauth').setIssuedAt().setExpirationTime('10m').sign(secret(env));
     const google = new URL('https://accounts.google.com/o/oauth2/v2/auth');
@@ -69,7 +70,7 @@ export async function authRoute(request: Request, env: Env) {
       if (!tokens.id_token) throw new Error();
       const { payload: google } = await jwtVerify(tokens.id_token, googleKeys, { algorithms: ['RS256'], issuer: ['https://accounts.google.com','accounts.google.com'], audience: env.AUTH_GOOGLE_ID, requiredClaims: ['exp','iat','sub'], clockTolerance: 30 });
       if (google.azp && google.azp !== env.AUTH_GOOGLE_ID) throw new Error();
-      if (google.nonce !== payload.nonce || google.email_verified !== true || typeof google.email !== 'string' || !allowed(env, google.email)) throw new Error();
+      if (google.nonce !== payload.nonce || google.email_verified !== true || typeof google.email !== 'string' || !await allowed(env, google.email)) throw new Error();
       return redirect(`${originFor(env.AUTH_URL)}/dashboard`, [clearState, cookie(env, sessionName, await sessionToken(env, google.email), 8 * 3600)]);
     } catch {
       // Never log authorization codes, token responses, emails, or callback query strings.

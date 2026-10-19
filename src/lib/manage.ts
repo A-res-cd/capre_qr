@@ -1,9 +1,9 @@
 import { auth } from '@/auth';
-import { staffActor } from './access';
+import { staffActor } from './staff';
 import { db } from './db';
 import { HttpError } from './codes';
 export async function requireStaff(request: Request) {
-  const actor = staffActor(await auth());
+  const actor = await staffActor(await auth());
   if (!actor) throw new HttpError(401, 'Authorized staff sign-in required.');
   if (!['GET', 'HEAD'].includes(request.method)) {
     const expected = new URL(process.env.AUTH_URL || request.url).origin;

@@ -20,7 +20,7 @@ async function scan(code:string,ua='Mozilla iPhone Mobile',method='GET',bindings
 beforeAll(async()=>{
   mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:'export default {fetch(){return new Response("test")}}',compatibilityDate:'2026-10-19',d1Databases:{DB:'isolated-capreqr-tests'}}));
   env={DB:await mf.getD1Database('DB') as unknown as Env['DB'],ASSETS:{fetch:async()=>new Response('<h1>CapreQR</h1>',{headers:{'Content-Type':'text/html'}})},AUTH_URL:'https://capreqr.example',QR_BASE_URL:'https://qr.example',AUTH_SECRET:'test-only-secret-with-more-than-32-random-characters',AUTH_GOOGLE_ID:'test-google-client',AUTH_GOOGLE_SECRET:'test-client-secret',STAFF_EMAILS:'staff@example.org',REPORTING_TIMEZONE:'Asia/Manila',ANALYTICS_RETENTION_DAYS:'90'};
-  const statements:string[]=[], lines=(await readFile('cloudflare/migrations/0001_initial.sql','utf8')).replace(/^\s*--.*$/gm,'').split('\n');
+  const statements:string[]=[], lines=(await readFile('cloudflare/migrations/0001_initial.sql','utf8')+'\n'+await readFile('cloudflare/migrations/0002_staff.sql','utf8')).replace(/^\s*--.*$/gm,'').split('\n');
   let sql='',trigger=false;
   for(const line of lines){if(!line.trim())continue;if(/^CREATE TRIGGER/.test(line))trigger=true;sql+=' '+line.trim();if(trigger?/\bEND;\s*$/.test(line):/;\s*$/.test(line)){statements.push(sql);sql='';trigger=false;}}
   await env.DB.batch(statements.map(sql=>env.DB.prepare(sql)));
@@ -113,6 +113,37 @@ describe('Workers/D1 implementation',()=>{
     expect((await api('preview','POST',{foreground:'#102d32',background:'#ffffff',logo:'data:image/svg+xml;base64,PHN2Zz4='})).status).toBe(400);
     expect((await api('preview','POST',{foreground:'#eeeeee',background:'#ffffff'})).status).toBe(400);
   });
+  it('owners add, promote and revoke staff; sessions and direct API access enforce current roles',async()=>{
+    expect((await api('staff')).status).toBe(200);
+    const email='managed@example.org';let response=await api('staff','PUT',{email:' MANAGED@example.org ',role:'STAFF',active:true,version:0});expect(response.status).toBe(200);let m=await response.json();
+    const staffToken=await sessionToken(env,email),cookie='capreqr-session='+staffToken;
+    expect((await api('codes','GET',undefined,{cookie})).status).toBe(200);
+    expect((await api('staff','GET',undefined,{cookie})).status).toBe(403);
+    expect((await api('staff','PUT',{email:'intruder@example.org',role:'OWNER',active:true,version:0},{cookie})).status).toBe(403);
+    expect((await api('staff','PUT',{email:'staff@example.org',role:'STAFF',active:false,version:0})).status).toBe(403);
+    response=await api('staff','PUT',{email,role:'OWNER',active:true,version:m.version});expect(response.status).toBe(200);m=await response.json();
+    expect((await api('staff','GET',undefined,{cookie})).status).toBe(200);
+    expect((await api('staff','PUT',{email,role:'STAFF',active:false,version:m.version},{cookie})).status).toBe(403);
+    const concurrent=await Promise.all([false,true].map(active=>api('staff','PUT',{email,role:'STAFF',active,version:m.version})));expect(concurrent.map(r=>r.status).sort()).toEqual([200,409]);
+    m=(await (await api('staff')).json()).members.find((x:{email:string})=>x.email===email);
+    response=await api('staff','PUT',{email,role:'STAFF',active:false,version:m.version});expect(response.status).toBe(200);m=await response.json();
+    expect((await api('codes','GET',undefined,{cookie})).status).toBe(401);
+    const session=await worker.fetch(new Request(env.AUTH_URL+'/api/auth/session',{headers:{cookie}}),env,ctx);expect(session.status).toBe(401);
+    expect((await api('staff','PUT',{email,role:'STAFF',active:true,version:m.version})).status).toBe(200);
+    expect((await api('codes','GET',undefined,{cookie})).status).toBe(200);
+    expect((await (await api('staff')).json()).history.some((h:{changes:{after:{email:string;active:boolean}}})=>h.changes.after.email===email&&!h.changes.after.active)).toBe(true);
+  });
+  it('staff updates and audits roll back together, including configured staff revocation overrides',async()=>{
+    const config={...env,STAFF_EMAILS:env.STAFF_EMAILS+',configured@example.org'};
+    const {saveMember,membership}=await import('../cloudflare/staff');
+    expect((await membership(config,'configured@example.org'))?.active).toBe(true);
+    await saveMember(config,'staff@example.org',{email:'configured@example.org',role:'STAFF',active:false,version:0});expect((await membership(config,'configured@example.org'))?.active).toBe(false);
+    await env.DB.exec("CREATE TRIGGER fail_staff_audit BEFORE INSERT ON AuditLog WHEN NEW.action='staff.updated' BEGIN SELECT RAISE(ABORT,'staff audit failure'); END;");
+    try{expect((await api('staff','PUT',{email:'rollback@example.org',role:'STAFF',active:true,version:0})).status).toBe(503);}finally{await env.DB.exec('DROP TRIGGER fail_staff_audit;');}
+    expect(await membership(env,'rollback@example.org')).toBeNull();
+    expect((await api('staff','PUT',{email:'not-an-email',role:'STAFF',active:true,version:0})).status).toBe(400);
+    expect((await api('staff','PUT',{email:'csrf@example.org',role:'STAFF',active:true,version:0},{origin:'https://evil.example'})).status).toBe(403);
+  });
   it('uses Google PKCE/state/nonce and verifies Google ID tokens before creating staff sessions',async()=>{
     const begin=await worker.fetch(new Request(env.AUTH_URL+'/api/auth/signin/google'),env,ctx);expect(begin.status).toBe(302);
     const google=new URL(begin.headers.get('location')!);expect(google.origin).toBe('https://accounts.google.com');expect(google.searchParams.get('code_challenge_method')).toBe('S256');expect(google.searchParams.get('redirect_uri')).toBe(env.AUTH_URL+'/api/auth/callback/google');
@@ -120,7 +151,7 @@ describe('Workers/D1 implementation',()=>{
     const {payload}=await jwtVerify(saved,new TextEncoder().encode(env.AUTH_SECRET),{issuer:'capreqr',audience:'oauth'});
     const rejected=await worker.fetch(new Request(env.AUTH_URL+'/api/auth/callback/google?code=test&state=wrong',{headers:{cookie:stateCookie}}),env,ctx);expect(rejected.headers.get('location')).toContain('error=AccessDenied');
     const pair=await generateKeyPair('RS256'),jwk=await exportJWK(pair.publicKey);jwk.kid='google-test';jwk.alg='RS256';jwk.use='sig';
-    const googleToken=await new SignJWT({email:'staff@example.org',email_verified:true,nonce:payload.nonce}).setProtectedHeader({alg:'RS256',kid:'google-test'}).setIssuer('https://accounts.google.com').setSubject('google-test-staff').setAudience(env.AUTH_GOOGLE_ID).setIssuedAt().setExpirationTime('1h').sign(pair.privateKey);
+    let googleToken=await new SignJWT({email:'staff@example.org',email_verified:true,nonce:payload.nonce}).setProtectedHeader({alg:'RS256',kid:'google-test'}).setIssuer('https://accounts.google.com').setSubject('google-test-staff').setAudience(env.AUTH_GOOGLE_ID).setIssuedAt().setExpirationTime('1h').sign(pair.privateKey);
     const originalFetch=globalThis.fetch;
     vi.stubGlobal('fetch',async(url:RequestInfo|URL,init?:RequestInit)=>{
       if(String(url)==='https://oauth2.googleapis.com/token'){expect(new URLSearchParams(String(init?.body)).get('code_verifier')).toBe(payload.verifier);return Response.json({id_token:googleToken});}
@@ -130,6 +161,13 @@ describe('Workers/D1 implementation',()=>{
     try{
       const callback=await worker.fetch(new Request(env.AUTH_URL+'/api/auth/callback/google?code=test&state='+payload.state,{headers:{cookie:stateCookie}}),env,ctx);
       expect(callback.headers.get('location')).toBe(env.AUTH_URL+'/dashboard');expect(callback.headers.getSetCookie().some(c=>c.startsWith('capreqr-session=')&&c.includes('HttpOnly')&&c.includes('Secure'))).toBe(true);
+      googleToken=await new SignJWT({email:'managed@example.org',email_verified:true,nonce:payload.nonce}).setProtectedHeader({alg:'RS256',kid:'google-test'}).setIssuer('https://accounts.google.com').setSubject('managed-google-staff').setAudience(env.AUTH_GOOGLE_ID).setIssuedAt().setExpirationTime('1h').sign(pair.privateKey);
+      const login=()=>worker.fetch(new Request(env.AUTH_URL+'/api/auth/callback/google?code=managed-test&state='+payload.state,{headers:{cookie:stateCookie}}),env,ctx);
+      expect((await login()).headers.get('location')).toBe(env.AUTH_URL+'/dashboard');
+      const managed=(await (await api('staff')).json()).members.find((m:{email:string})=>m.email==='managed@example.org');
+      expect((await api('staff','PUT',{email:managed.email,role:managed.role,active:false,version:managed.version})).status).toBe(200);
+      expect((await login()).headers.get('location')).toBe(env.AUTH_URL+'/signin?error=AccessDenied');
+
     }finally{vi.unstubAllGlobals();}
   });
 });

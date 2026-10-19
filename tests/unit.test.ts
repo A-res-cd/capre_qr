@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { destinationSchema, codeSchema, reliableColors } from '../src/lib/validation';
-import { allowedEmail, staffActor } from '../src/lib/access';
+import { configuredMember, effectiveMember, owners } from '../src/lib/staff-policy';
 import { deviceCategory, excludedRequest } from '../src/lib/queue';
 import { rangeFor, csvCell } from '../src/lib/analytics';
 import { renderQR, sanitizeLogo } from '../src/lib/qr';
@@ -23,12 +23,15 @@ describe('safe inputs and privacy', () => {
     expect(excludedRequest(new Headers({ 'sec-purpose': 'prefetch' }))).toBe(true);
     expect(excludedRequest(new Headers({ 'user-agent': 'Mozilla iPhone Mobile' }))).toBe(false);
   });
-  it('denies empty allowlists, unverified sessions, and revoked staff', () => {
-    process.env.STAFF_EMAILS = ''; expect(allowedEmail('a@example.org')).toBe(false);
-    process.env.STAFF_EMAILS = ' A@example.org '; expect(allowedEmail('a@example.org')).toBe(true);
-    expect(staffActor({ user: { email: 'a@example.org' } })).toBeNull();
-    expect(staffActor({ user: { email: 'a@example.org' }, verifiedStaff: true })).toBe('a@example.org');
-    process.env.STAFF_EMAILS = 'other@example.org'; expect(staffActor({ user: { email: 'a@example.org' }, verifiedStaff: true })).toBeNull();
+  it('keeps a protected recovery owner and lets database revocation override configured staff', () => {
+    expect(configuredMember({},'a@example.org')).toBeNull();
+    const config={STAFF_EMAILS:' A@example.org, teammate@example.org '};
+    expect(owners(config)).toEqual(['a@example.org']);
+    expect(configuredMember(config,'a@example.org')?.role).toBe('OWNER');
+    const revoked={email:'teammate@example.org',role:'STAFF' as const,active:false,version:1,updatedAt:null,configured:false};
+    expect(effectiveMember(config,revoked.email,revoked)?.active).toBe(false);
+    expect(effectiveMember(config,'a@example.org',{...revoked,email:'a@example.org'})?.active).toBe(true);
+    expect(owners({...config,OWNER_EMAILS:' Owner@example.org '})).toEqual(['owner@example.org']);
   });
   it('uses local reporting days across DST and partial-hour offsets', () => {
     const dst = rangeFor(new URLSearchParams({ start: '2026-03-08', end: '2026-03-08' }), 'America/New_York');

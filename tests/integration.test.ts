@@ -13,7 +13,7 @@ const staff = 'staff@example.org';
 const request = (ua = 'Mozilla iPhone Mobile') => new Request('https://qr.example.org/AbCdEfGhIjKl', { headers: { 'user-agent': ua } });
 const ctx = (path: string[]) => ({ params: Promise.resolve({ path }) });
 beforeAll(async () => {
-  await db.$executeRawUnsafe('TRUNCATE "ScanEvent", "ScanSummary", "ProcessedEvent", "PendingScan", "AuditLog", "QRCodeTag", "QRCode", "Folder", "Tag", "OrganizationSettings", "RateLimit" CASCADE');
+  await db.$executeRawUnsafe('TRUNCATE "StaffMember", "ScanEvent", "ScanSummary", "ProcessedEvent", "PendingScan", "AuditLog", "QRCodeTag", "QRCode", "Folder", "Tag", "OrganizationSettings", "RateLimit" CASCADE');
 });
 afterAll(async () => { await db.$disconnect(); });
 describe('real PostgreSQL lifecycle and analytics', () => {
@@ -76,7 +76,28 @@ describe('real PostgreSQL lifecycle and analytics', () => {
     const paused = { ...event, id: randomUUID(), outcome: 'paused' as const }; await db.$transaction(tx => processEvent(tx, paused));
     const report = await analytics(new URLSearchParams({ qrId: code.id })); expect(report.total).toBe(1); expect(report.pausedVisits).toBe(1); expect(report.devices).toEqual([{ device: 'mobile', count: 1 }]);
   });
+  it('owner-only staff management revokes sessions and records changes in PostgreSQL', async () => {
+    const manage=(method:string,body?:unknown)=>new Request('https://staff.example.org/api/manage/staff',{method,headers:{origin:'https://staff.example.org','content-type':'application/json'},body:body?JSON.stringify(body):undefined});
+    session.value={user:{email:staff},verifiedStaff:true};
+    let r=await PUT(manage('PUT',{email:'managed@example.org',role:'STAFF',active:true,version:0}),ctx(['staff']));expect(r.status).toBe(200);let member=await r.json();
+    session.value={user:{email:member.email},verifiedStaff:true};
+    expect((await GET(manage('GET'),ctx(['staff']))).status).toBe(403);
+    expect((await GET(manage('GET'),ctx(['codes']))).status).toBe(200);
+    session.value={user:{email:staff},verifiedStaff:true};
+    expect((await PUT(manage('PUT',{email:staff,role:'STAFF',active:false,version:0}),ctx(['staff']))).status).toBe(403);
+    r=await PUT(manage('PUT',{email:member.email,role:'OWNER',active:true,version:member.version}),ctx(['staff']));expect(r.status).toBe(200);member=await r.json();
+    session.value={user:{email:member.email},verifiedStaff:true};expect((await GET(manage('GET'),ctx(['staff']))).status).toBe(200);
+    expect((await PUT(manage('PUT',{email:member.email,role:'STAFF',active:false,version:member.version}),ctx(['staff']))).status).toBe(403);
+    session.value={user:{email:staff},verifiedStaff:true};
+    r=await PUT(manage('PUT',{email:member.email,role:'STAFF',active:false,version:member.version}),ctx(['staff']));expect(r.status).toBe(200);member=await r.json();
+    expect((await PUT(manage('PUT',{email:member.email,role:'STAFF',active:true,version:member.version-1}),ctx(['staff']))).status).toBe(409);
+    session.value={user:{email:member.email},verifiedStaff:true};expect((await GET(manage('GET'),ctx(['codes']))).status).toBe(401);
+    session.value={user:{email:staff},verifiedStaff:true};
+    const list=await (await GET(manage('GET'),ctx(['staff']))).json();expect(list.members.find((m:{email:string})=>m.email===member.email).active).toBe(false);expect(list.history.length).toBe(3);
+  });
   it('management APIs protect all reads, writes, exports, previews, and settings', async () => {
+    session.value = { user: { email: staff }, verifiedStaff: false };
+    expect((await GET(new Request('https://staff.example.org/api/manage/codes'), ctx(['codes']))).status).toBe(401);
     session.value = null;
     for (const path of [['codes'], ['codes', randomUUID()], ['codes', randomUUID(), 'download'], ['analytics'], ['settings'], ['options']]) expect((await GET(new Request('https://staff.example.org/api/manage/' + path.join('/')), ctx(path))).status).toBe(401);
     for (const [method, path] of [[POST, ['codes']], [POST, ['preview']], [POST, ['codes', randomUUID(), 'action']], [PUT, ['settings']]] as const) expect((await method(new Request('https://staff.example.org/api/manage/x', { method: method === PUT ? 'PUT' : 'POST', headers: { origin: 'https://staff.example.org', 'content-type': 'application/json' }, body: '{}' }), ctx([...path]))).status).toBe(401);

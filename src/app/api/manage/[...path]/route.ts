@@ -5,6 +5,7 @@ import { db } from '@/lib/db';
 import { HttpError, findCode, listCodes, present, saveCode, lifecycle } from '@/lib/codes';
 import { analytics, analyticsCsv } from '@/lib/analytics';
 import { getSettings } from '@/lib/settings';
+import { membership, staffList, saveMember } from '@/lib/staff';
 import { settingsSchema, shortLink, designSchema, InputError } from '@/lib/validation';
 import { renderQR, sanitizeLogo } from '@/lib/qr';
 export const runtime = 'nodejs';
@@ -18,7 +19,10 @@ async function handle(request: Request, context: { params: Promise<{ path: strin
     const params = new URL(request.url).searchParams;
     if (path.length > 3) throw new HttpError(404, 'Not found.');
     let data: unknown;
-    if (resource === 'codes' && !id && request.method === 'GET') data = await listCodes(params);
+    if(resource==='me' && !id && request.method==='GET') data={email:actor,role:(await membership(actor))!.role};
+    else if(resource==='staff' && !id && request.method==='GET') data=await staffList(actor);
+    else if(resource==='staff' && !id && request.method==='PUT') data=await saveMember(actor,await readJson(request));
+    else if (resource === 'codes' && !id && request.method === 'GET') data = await listCodes(params);
     else if (resource === 'codes' && !id && request.method === 'POST') data = await saveCode(await readJson(request), actor);
     else if (resource === 'codes' && id) {
       z.uuid().parse(id);

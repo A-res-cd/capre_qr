@@ -8,7 +8,7 @@ const pool = new Pool({connectionString:process.env.DATABASE_URL,max:1});
 const client = await pool.connect();
 const directory = path.resolve('.local-tools');
 const output = path.join(directory,'capreqr-d1-export.sql');
-const tables = ['OrganizationSettings','Folder','Tag','QRCode','QRCodeTag','AuditLog','ProcessedEvent','ScanEvent','ScanSummary','PendingScan'] as const;
+const tables = ['OrganizationSettings','StaffMember','Folder','Tag','QRCode','QRCodeTag','AuditLog','ProcessedEvent','ScanEvent','ScanSummary','PendingScan'] as const;
 function literal(value: unknown): string {
   if (value == null) return 'NULL';
   if (typeof value === 'boolean') return value ? '1':'0';

@@ -230,3 +230,21 @@ tbody tr:hover { background: #fdfcf7; }
   .primary, .secondary { transition: none; }
   .primary:hover { transform: none; }
 }
+
+.staff-management { display:grid; gap:24px; }
+.staff-access-form { display:grid; grid-template-columns:minmax(0,1fr) 160px auto; gap:16px; align-items:end; padding:24px; }
+.staff-access-form input { width:100%; }
+.staff-email { overflow-wrap:anywhere; }
+.staff-email small { display:block; color:var(--color-muted); }
+.staff-actions { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.staff-confirm { padding:24px; display:grid; gap:16px; }
+@media(max-width:700px) { .staff-access-form { grid-template-columns:1fr; padding:18px; } .staff-management .panel-heading { align-items:flex-start; gap:12px; flex-wrap:wrap; } }
+
+@media(max-width:700px) {
+  .staff-management .table-wrap table, .staff-management .table-wrap tbody { display:block; min-width:0; width:100%; }
+  .staff-management .table-wrap thead { display:none; }
+  .staff-management .table-wrap tr { display:block; padding:16px 18px; border-top:1px solid var(--border-color); }
+  .staff-management .table-wrap td { display:grid; grid-template-columns:64px minmax(0,1fr); gap:8px; align-items:start; padding:8px 0; border:0; white-space:normal; }
+  .staff-management .table-wrap td::before { content:attr(data-label); font-size:10px; font-weight:600; color:var(--color-primary); }
+  .staff-management .staff-email small { grid-column:2; }
+}

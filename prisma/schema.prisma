@@ -108,3 +108,10 @@ model RateLimit {
   window DateTime @db.Timestamptz(3)
   count Int @default(1)
 }
+model StaffMember {
+  email String @id
+  role String
+  active Boolean @default(true)
+  version Int @default(1)
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+}
